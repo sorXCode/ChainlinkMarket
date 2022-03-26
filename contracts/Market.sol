@@ -4,6 +4,8 @@ import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 interface IERC20{
     function transferFrom(address _from,address _to,uint256 _amount) external returns(bool);
     function transfer(address _to,uint256 _amount) external returns(bool);
+    function symbol() external returns(string memory);
+    function balanceOf(address account) external view returns (uint256);
 }
 
 
@@ -21,24 +23,24 @@ contract Market {
     }
     struct Record {
         address initiator;
+        ROUTE route;
+        uint8 decimals;
+        uint64 timestamp;
         string fromToken;
         string toToken;
-        ROUTE route;
         uint256 fromAmount;
         uint256 toAmount;
-        uint256 timestamp;
-        uint8 decimals;
-        uint32 price;
+        int256 price;
     }
 
     event Notify(Record record);
 
     AggregatorV3Interface internal priceFeed;
+    uint256 internal lastRecordId = 0;
     string public fromToken;
     string public toToken;
     mapping(string => IERC20) tokenContracts;
     mapping(uint => Record) records;
-    uint256 internal lastRecordId = 0;
 
 
     modifier noNoneRoute(ROUTE _route) {
@@ -56,11 +58,16 @@ contract Market {
     *
     * *symbols for tokens are automatically fetched and updated
     */
-    constructor(address _fromAddr, address _toAddr, address _aggregatorAddress) public {
-        tokenContracts[_from] = IERC20(_fromAddr);
-        fromToken = tokenContracts[_from].symbol();
-        tokenContracts[_to] = IERC20(_toAddr);
-        toToken = tokenContracts[_to].symbol();
+    constructor(address _fromAddr, address _toAddr, address _aggregatorAddress) {
+        IERC20 _fromToken = IERC20(_fromAddr);
+        IERC20 _toToken = IERC20(_toAddr);
+        
+        fromToken = _fromToken.symbol();
+        toToken = _toToken.symbol();
+
+        tokenContracts[fromToken] = _fromToken;
+        tokenContracts[toToken] = _toToken;
+
         priceFeed = AggregatorV3Interface(_aggregatorAddress);
     }
 
@@ -82,10 +89,8 @@ contract Market {
     *
     */
     function getQuote(string memory _from, string memory _to, uint _fromAmount)
-        public view returns (int _price, uint8 _priceDecimals, uint _result, Route _route)
+        public view returns (int _price, uint8 _priceDecimals, uint _result, ROUTE _route)
     {
-
-        ROUTE _route;
         if (_hashString(_from)==_hashString(fromToken) && _hashString(_to)==_hashString(toToken)) {
             _route = ROUTE.FROM_TO;
         }
@@ -99,7 +104,7 @@ contract Market {
 
         _priceDecimals = priceFeed.decimals();
         (,_price,,,) = priceFeed.latestRoundData();
-        result = _calculateResult(_route, uint(price), priceDecimals, fromAmount);
+        _result = _calculateResult(_route, uint(_price), _priceDecimals, _fromAmount);
 
     }
 
@@ -115,15 +120,15 @@ contract Market {
     *  - Returns
     *    _result: result of calculation. the quote
     */
-    function _calculateResult(ROUTE _route, uint price, uint8 priceDecimals, uint amount)
+    function _calculateResult(ROUTE _route, uint _price, uint8 _priceDecimals, uint _amount)
         internal pure noNoneRoute(_route) returns (uint _result)
     {
         if (_route == ROUTE.FROM_TO) {
-            result = (price * amount ) / 10 ** priceDecimals;
+            _result = (_price * _amount ) / 10 ** _priceDecimals;
         }
 
         else if (_route == ROUTE.TO_FROM) {
-            result = (10 ** priceDecimals * amount) / price;
+            _result = (10 ** _priceDecimals * _amount) / _price;
         }
     }
 
@@ -140,24 +145,27 @@ contract Market {
     }
 
     
-    function swap(string memory _from, string memory _to, uint256 _amount) public payable {
+    function swap(string memory _from, string memory _to, uint256 _amount) public {
         ++lastRecordId;
 
-        (int _price,  uint8 _priceDecimals, uint _result, Route _route ) = getQuote(_from, _to, _amount);
+        (int _price,  uint8 _priceDecimals, uint _result, ROUTE _route ) = getQuote(_from, _to, _amount);
         require(_result > 0, "Invalid exchange");
+        IERC20 from;
+        IERC20 to;
+
         if (_route == ROUTE.FROM_TO){
-            IERC20 from = tokenContracts[fromToken];
-            IERC20 to = tokenContracts[toToken];
+            from = tokenContracts[fromToken];
+            to = tokenContracts[toToken];
         }
         else if (_route == ROUTE.TO_FROM){
-            IERC20 from = tokenContracts[toToken];
-            IERC20 to = tokenContracts[fromToken];
+            from = tokenContracts[toToken];
+            to = tokenContracts[fromToken];
         }
 
-        // check that contract have enough balance for transaction
-        require(to.balanceOf(address(this)) >= _result, "Insufficient liquidity to fulfil swap")
+        // check that contract have enough liquidity for transaction
+        require(to.balanceOf(address(this)) >= _result, "Insufficient liquidity to fulfil swap");
         // move fromToken from initiator to contract via allowance
-        require(from.transferFrom(_record.initiator, address(this), _fromAmount), "Failed to transfer from initiator");
+        require(from.transferFrom(msg.sender, address(this), _amount), "Failed to transfer from initiator");
 
         Record storage _record = records[lastRecordId];
 
@@ -167,12 +175,13 @@ contract Market {
         _record.route = _route;
         _record.fromAmount = _amount;
         _record.toAmount = _result;
-        _record.timestamp = block.timestamp;
+        _record.timestamp = uint64(block.timestamp);
         _record.decimals = _priceDecimals;
         _record.price = _price;
 
         // move toToken from contract to initiator
-        require(to.transfer(_record.initiator, _toAmount), "Failed to transfer to initiator");
+        require(to.transfer(_record.initiator, _record.toAmount), "Failed to transfer to initiator");
+        emit Notify(_record);
     }
     
 }
