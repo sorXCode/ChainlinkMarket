@@ -5,6 +5,7 @@ interface IERC20{
     function transferFrom(address _from,address _to,uint256 _amount) external returns(bool);
     function transfer(address _to,uint256 _amount) external returns(bool);
     function symbol() external returns(string memory);
+    function decimals() external returns(uint256);
     function balanceOf(address account) external view returns (uint256);
 }
 
@@ -36,6 +37,7 @@ contract Market {
     event Notify(Record record);
 
     AggregatorV3Interface internal priceFeed;
+    uint8 public resultsDecimal = 2; // results accurate to 2 decimal places
     uint256 internal lastRecordId = 0;
     string public fromToken;
     string public toToken;
@@ -55,18 +57,16 @@ contract Market {
     * _fromAddr: fromToken's Address
     * _toAddr: toToken's Address
     * _aggregatorAddress: priceFeed aggregator's address
+    * _fromTokenName: fromToken name
+    * _toTokenName: toToken name
     *
     * *symbols for tokens are automatically fetched and updated
     */
-    constructor(address _fromAddr, address _toAddr, address _aggregatorAddress) {
-        IERC20 _fromToken = IERC20(_fromAddr);
-        IERC20 _toToken = IERC20(_toAddr);
-        
-        fromToken = _fromToken.symbol();
-        toToken = _toToken.symbol();
-
-        tokenContracts[fromToken] = _fromToken;
-        tokenContracts[toToken] = _toToken;
+    constructor(address _fromAddr, address _toAddr, address _aggregatorAddress, string memory _fromTokenName, string memory _toTokenName) {
+        fromToken = _fromTokenName;
+        toToken = _toTokenName;
+        tokenContracts[fromToken] = IERC20(_fromAddr);
+        tokenContracts[toToken] = IERC20(_toAddr);
 
         priceFeed = AggregatorV3Interface(_aggregatorAddress);
     }
@@ -89,7 +89,7 @@ contract Market {
     *
     */
     function getQuote(string memory _from, string memory _to, uint _fromAmount)
-        public view returns (int _price, uint8 _priceDecimals, uint _result, ROUTE _route)
+        public view returns (int _price, uint8 _priceDecimals, uint _result, uint _resultDecimals, ROUTE _route)
     {
         if (_hashString(_from)==_hashString(fromToken) && _hashString(_to)==_hashString(toToken)) {
             _route = ROUTE.FROM_TO;
@@ -104,6 +104,7 @@ contract Market {
 
         _priceDecimals = priceFeed.decimals();
         (,_price,,,) = priceFeed.latestRoundData();
+        _resultDecimals = resultsDecimal;
         _result = _calculateResult(_route, uint(_price), _priceDecimals, _fromAmount);
 
     }
@@ -121,14 +122,14 @@ contract Market {
     *    _result: result of calculation. the quote
     */
     function _calculateResult(ROUTE _route, uint _price, uint8 _priceDecimals, uint _amount)
-        internal pure noNoneRoute(_route) returns (uint _result)
+        internal view noNoneRoute(_route) returns (uint _result)
     {
         if (_route == ROUTE.FROM_TO) {
-            _result = (_price * _amount ) / 10 ** _priceDecimals;
+            _result = (_price * _amount ) / 10 ** (_priceDecimals - resultsDecimal);
         }
 
         else if (_route == ROUTE.TO_FROM) {
-            _result = (10 ** _priceDecimals * _amount) / _price;
+            _result = (10 ** (_priceDecimals + resultsDecimal) * _amount) / _price;
         }
     }
 
@@ -148,8 +149,7 @@ contract Market {
     function swap(string memory _from, string memory _to, uint256 _amount) public {
         ++lastRecordId;
 
-        (int _price,  uint8 _priceDecimals, uint _result, ROUTE _route ) = getQuote(_from, _to, _amount);
-        require(_result > 0, "Invalid exchange");
+        (int _price,  uint8 _priceDecimals, uint _result, ,ROUTE _route ) = getQuote(_from, _to, _amount);
         IERC20 from;
         IERC20 to;
 
@@ -161,6 +161,11 @@ contract Market {
             from = tokenContracts[toToken];
             to = tokenContracts[fromToken];
         }
+        // convert to tokens' decimal equivalent
+        _amount = _amount * 10 ** from.decimals();
+        _result = _result * 10 ** (from.decimals() - resultsDecimal);
+        
+        require(_result > 0, "Exchange too low");
 
         // check that contract have enough liquidity for transaction
         require(to.balanceOf(address(this)) >= _result, "Insufficient liquidity to fulfil swap");

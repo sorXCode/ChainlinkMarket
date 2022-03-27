@@ -1,25 +1,18 @@
-// We require the Hardhat Runtime Environment explicitly here. This is optional
-// but useful for running the script in a standalone fashion through `node <script>`.
-//
-// When running the script with `npx hardhat run <script>` you'll find the Hardhat
-// Runtime Environment's members available in the global scope.
 import { ethers } from "hardhat";
 
 async function main() {
-  // Hardhat always runs the compile task when running scripts with its command
-  // line interface.
-  //
-  // If this script is run directly using `node` you may want to call compile
-  // manually to make sure everything is compiled
-  // await hre.run('compile');
+  // network -> forked mainnet
+  const Market = await ethers.getContractFactory("Market");
+  const fromAddr = "0x0D8775F648430679A709E98d2b0Cb6250d2887EF"; // BAT
+  const toAddr = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"; // USDC
+  const aggrAddr = "0x9441D7556e7820B5ca42082cfa99487D56AcA958"; // BAT/USDC aggregator
 
-  // We get the contract to deploy
-  const Greeter = await ethers.getContractFactory("Greeter");
-  const greeter = await Greeter.deploy("Hello, Hardhat!");
+  const market = await Market.deploy(fromAddr, toAddr, aggrAddr);
 
-  await greeter.deployed();
+  await market.deployed();
 
-  console.log("Greeter deployed to:", greeter.address);
+  console.log("Market deployed to:", market.address);
+  // 0x4bf010f1b9beDA5450a8dD702ED602A104ff65EE
 }
 
 // We recommend this pattern to be able to use async/await everywhere
