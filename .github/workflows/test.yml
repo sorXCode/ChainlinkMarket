@@ -1,8 +1,6 @@
 name: NodeJS
 
 on:
-  push:
-    branches: [ "master", ${{ github.head_ref || github.ref_name }} ]
   pull_request:
     branches: [ "master" ]
 
