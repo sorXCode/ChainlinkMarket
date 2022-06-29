@@ -5,6 +5,7 @@
   "author": "sorxcode <sorxcode@gmail.com>",
   "license": "MIT",
   "dependencies": {
+    "@chainlink/contracts": "^0.4.1",
     "hardhat": "^2.9.1"
   },
   "devDependencies": {

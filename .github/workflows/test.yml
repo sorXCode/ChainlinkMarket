@@ -1,8 +1,8 @@
-name: NodeJS with Webpack
+name: NodeJS
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "update" ]
   pull_request:
     branches: [ "master" ]
 
@@ -24,5 +24,6 @@ jobs:
 
     - name: Build
       run: |
-        npm install
+        npm install yarn
+        yarn install
         npx hardhat test
